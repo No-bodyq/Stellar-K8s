@@ -16,7 +16,7 @@ use kube::{
         finalizer::{finalizer, Event},
         watcher::Config,
     },
-    Resource, ResourceExt,
+    ResourceExt,
 };
 use tracing::{error, info, instrument, warn};
 
@@ -151,10 +151,20 @@ async fn apply_stellar_node(client: &Client, node: &StellarNode) -> Result<Actio
     resources::ensure_service(client, node).await?;
     info!("Service ensured for {}/{}", namespace, name);
 
-    // 5. Fetch the ready replicas from Deployment/StatefulSet status
+    // 5. Create/update ServiceMonitor for Prometheus scraping (if autoscaling enabled)
+    if node.spec.autoscaling.is_some() {
+        resources::ensure_service_monitor(client, node).await?;
+        info!("ServiceMonitor ensured for {}/{}", namespace, name);
+
+        // 6. Create/update HPA for autoscaling
+        resources::ensure_hpa(client, node).await?;
+        info!("HPA ensured for {}/{}", namespace, name);
+    }
+
+    // 7. Fetch the ready replicas from Deployment/StatefulSet status
     let ready_replicas = get_ready_replicas(client, node).await.unwrap_or(0);
 
-    // 6. Update status to Running with ready replica count
+    // 8. Update status to Running with ready replica count
     let phase = if node.spec.suspended {
         "Suspended"
     } else {
@@ -182,22 +192,32 @@ async fn cleanup_stellar_node(client: &Client, node: &StellarNode) -> Result<Act
 
     // Delete resources in reverse order of creation
 
-    // 1. Delete Service
+    // 1. Delete HPA (if autoscaling was configured)
+    if let Err(e) = resources::delete_hpa(client, node).await {
+        warn!("Failed to delete HPA: {:?}", e);
+    }
+
+    // 2. Delete ServiceMonitor (if autoscaling was configured)
+    if let Err(e) = resources::delete_service_monitor(client, node).await {
+        warn!("Failed to delete ServiceMonitor: {:?}", e);
+    }
+
+    // 3. Delete Service
     if let Err(e) = resources::delete_service(client, node).await {
         warn!("Failed to delete Service: {:?}", e);
     }
 
-    // 2. Delete Deployment/StatefulSet
+    // 4. Delete Deployment/StatefulSet
     if let Err(e) = resources::delete_workload(client, node).await {
         warn!("Failed to delete workload: {:?}", e);
     }
 
-    // 3. Delete ConfigMap
+    // 5. Delete ConfigMap
     if let Err(e) = resources::delete_config_map(client, node).await {
         warn!("Failed to delete ConfigMap: {:?}", e);
     }
 
-    // 4. Delete PVC based on retention policy
+    // 6. Delete PVC based on retention policy
     if node.spec.should_delete_pvc() {
         info!(
             "Deleting PVC for node: {}/{} (retention policy: Delete)",

@@ -219,6 +219,70 @@ fn default_max_events() -> u32 {
     10000
 }
 
+/// Horizontal Pod Autoscaling configuration for Horizon and SorobanRpc nodes
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoscalingConfig {
+    /// Minimum number of replicas
+    pub min_replicas: i32,
+
+    /// Maximum number of replicas
+    pub max_replicas: i32,
+
+    /// Target CPU utilization percentage (0-100)
+    /// When set, enables CPU-based scaling
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_cpu_utilization_percentage: Option<i32>,
+
+    /// List of custom metrics to scale on (e.g., ["http_requests_per_second"])
+    /// Requires Prometheus Adapter to be installed in the cluster
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_metrics: Vec<String>,
+
+    /// Behavior configuration for scale up/down
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub behavior: Option<ScalingBehavior>,
+}
+
+/// Scaling behavior configuration for HPA
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ScalingBehavior {
+    /// Scale up configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scale_up: Option<ScalingPolicy>,
+
+    /// Scale down configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scale_down: Option<ScalingPolicy>,
+}
+
+/// Scaling policy for scale up/down
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ScalingPolicy {
+    /// Stabilization window in seconds (how long to wait before scaling again)
+    pub stabilization_window_seconds: Option<i32>,
+
+    /// List of policies with different percentage/pod changes
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policies: Vec<HPAPolicy>,
+}
+
+/// Individual HPA policy
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HPAPolicy {
+    /// Type of policy: "Percent" or "Pods"
+    pub policy_type: String,
+
+    /// Value for the policy (percentage or number of pods)
+    pub value: i32,
+
+    /// Period in seconds over which the policy is applied
+    pub period_seconds: i32,
+}
+
 /// Condition for status reporting (Kubernetes convention)
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]

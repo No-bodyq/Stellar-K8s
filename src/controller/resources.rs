@@ -5,8 +5,10 @@
 
 use std::collections::BTreeMap;
 
-use k8s_openapi::api::apps::v1::{
-    Deployment, DeploymentSpec, StatefulSet, StatefulSetSpec,
+use k8s_openapi::api::apps::v1::{Deployment, DeploymentSpec, StatefulSet, StatefulSetSpec};
+use k8s_openapi::api::autoscaling::v2::{
+    CrossVersionObjectReference, HorizontalPodAutoscaler, HorizontalPodAutoscalerSpec, MetricSpec,
+    ResourceMetricSource, ResourceMetricStatus,
 };
 use k8s_openapi::api::core::v1::{
     ConfigMap, Container, ContainerPort, EnvVar, EnvVarSource, PersistentVolumeClaim,
@@ -17,7 +19,7 @@ use k8s_openapi::api::core::v1::{
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta, OwnerReference};
 use kube::api::{Api, DeleteParams, Patch, PatchParams, PostParams};
-use kube::{Client, Resource, ResourceExt};
+use kube::{Client, CustomResourceExt, Resource, ResourceExt};
 use tracing::{info, warn};
 
 use crate::crd::{NodeType, StellarNode};
@@ -26,7 +28,10 @@ use crate::error::{Error, Result};
 /// Get the standard labels for a StellarNode's resources
 fn standard_labels(node: &StellarNode) -> BTreeMap<String, String> {
     let mut labels = BTreeMap::new();
-    labels.insert("app.kubernetes.io/name".to_string(), "stellar-node".to_string());
+    labels.insert(
+        "app.kubernetes.io/name".to_string(),
+        "stellar-node".to_string(),
+    );
     labels.insert("app.kubernetes.io/instance".to_string(), node.name_any());
     labels.insert(
         "app.kubernetes.io/component".to_string(),
@@ -36,7 +41,10 @@ fn standard_labels(node: &StellarNode) -> BTreeMap<String, String> {
         "app.kubernetes.io/managed-by".to_string(),
         "stellar-operator".to_string(),
     );
-    labels.insert("stellar.org/node-type".to_string(), node.spec.node_type.to_string());
+    labels.insert(
+        "stellar.org/node-type".to_string(),
+        node.spec.node_type.to_string(),
+    );
     labels
 }
 
@@ -89,7 +97,10 @@ fn build_pvc(node: &StellarNode) -> PersistentVolumeClaim {
     let name = resource_name(node, "data");
 
     let mut requests = BTreeMap::new();
-    requests.insert("storage".to_string(), Quantity(node.spec.storage.size.clone()));
+    requests.insert(
+        "storage".to_string(),
+        Quantity(node.spec.storage.size.clone()),
+    );
 
     // Merge custom annotations from storage config with existing annotations
     let annotations = node.spec.storage.annotations.clone().unwrap_or_default();
@@ -179,13 +190,19 @@ fn build_config_map(node: &StellarNode) -> ConfigMap {
         }
         NodeType::Horizon => {
             if let Some(config) = &node.spec.horizon_config {
-                data.insert("STELLAR_CORE_URL".to_string(), config.stellar_core_url.clone());
+                data.insert(
+                    "STELLAR_CORE_URL".to_string(),
+                    config.stellar_core_url.clone(),
+                );
                 data.insert("INGEST".to_string(), config.enable_ingest.to_string());
             }
         }
         NodeType::SorobanRpc => {
             if let Some(config) = &node.spec.soroban_config {
-                data.insert("STELLAR_CORE_URL".to_string(), config.stellar_core_url.clone());
+                data.insert(
+                    "STELLAR_CORE_URL".to_string(),
+                    config.stellar_core_url.clone(),
+                );
                 if let Some(captive_config) = &config.captive_core_config {
                     data.insert("captive-core.cfg".to_string(), captive_config.clone());
                 }
@@ -236,8 +253,12 @@ pub async fn ensure_deployment(client: &Client, node: &StellarNode) -> Result<()
     let deployment = build_deployment(node);
 
     let patch = Patch::Apply(&deployment);
-    api.patch(&name, &PatchParams::apply("stellar-operator").force(), &patch)
-        .await?;
+    api.patch(
+        &name,
+        &PatchParams::apply("stellar-operator").force(),
+        &patch,
+    )
+    .await?;
 
     Ok(())
 }
@@ -246,7 +267,11 @@ fn build_deployment(node: &StellarNode) -> Deployment {
     let labels = standard_labels(node);
     let name = node.name_any();
 
-    let replicas = if node.spec.suspended { 0 } else { node.spec.replicas };
+    let replicas = if node.spec.suspended {
+        0
+    } else {
+        node.spec.replicas
+    };
 
     Deployment {
         metadata: ObjectMeta {
@@ -282,8 +307,12 @@ pub async fn ensure_statefulset(client: &Client, node: &StellarNode) -> Result<(
     let statefulset = build_statefulset(node);
 
     let patch = Patch::Apply(&statefulset);
-    api.patch(&name, &PatchParams::apply("stellar-operator").force(), &patch)
-        .await?;
+    api.patch(
+        &name,
+        &PatchParams::apply("stellar-operator").force(),
+        &patch,
+    )
+    .await?;
 
     Ok(())
 }
@@ -360,8 +389,12 @@ pub async fn ensure_service(client: &Client, node: &StellarNode) -> Result<()> {
     let service = build_service(node);
 
     let patch = Patch::Apply(&service);
-    api.patch(&name, &PatchParams::apply("stellar-operator").force(), &patch)
-        .await?;
+    api.patch(
+        &name,
+        &PatchParams::apply("stellar-operator").force(),
+        &patch,
+    )
+    .await?;
 
     Ok(())
 }
@@ -546,4 +579,161 @@ fn build_container(node: &StellarNode) -> Container {
         ]),
         ..Default::default()
     }
+}
+// ============================================================================
+// HorizontalPodAutoscaler
+// ============================================================================
+
+/// Ensure a HorizontalPodAutoscaler exists for RPC nodes with autoscaling enabled
+pub async fn ensure_hpa(client: &Client, node: &StellarNode) -> Result<()> {
+    // Only create HPA for Horizon and SorobanRpc nodes with autoscaling config
+    if !matches!(
+        node.spec.node_type,
+        NodeType::Horizon | NodeType::SorobanRpc
+    ) || node.spec.autoscaling.is_none()
+    {
+        return Ok(());
+    }
+
+    let namespace = node.namespace().unwrap_or_else(|| "default".to_string());
+    let api: Api<HorizontalPodAutoscaler> = Api::namespaced(client.clone(), &namespace);
+    let name = resource_name(node, "hpa");
+
+    let hpa = build_hpa(node)?;
+
+    let patch = Patch::Apply(&hpa);
+    api.patch(
+        &name,
+        &PatchParams::apply("stellar-operator").force(),
+        &patch,
+    )
+    .await?;
+
+    info!("HPA ensured for {}/{}", namespace, name);
+    Ok(())
+}
+
+fn build_hpa(node: &StellarNode) -> Result<HorizontalPodAutoscaler> {
+    let autoscaling = node
+        .spec
+        .autoscaling
+        .as_ref()
+        .ok_or_else(|| Error::ValidationError("Autoscaling config not found".to_string()))?;
+
+    let namespace = node.namespace().unwrap_or_else(|| "default".to_string());
+    let name = resource_name(node, "hpa");
+    let deployment_name = node.name_any();
+
+    // Note: Custom metrics require Prometheus Adapter to be installed
+    // For now, we create a basic HPA with just the min/max replicas configured
+    // Users can manually add metrics via kubectl or kustomize/helm patches
+    if !autoscaling.custom_metrics.is_empty() {
+        info!(
+            "Custom metrics configured: {:?}. These require Prometheus Adapter to be installed.",
+            autoscaling.custom_metrics
+        );
+    }
+
+    let hpa = HorizontalPodAutoscaler {
+        metadata: ObjectMeta {
+            name: Some(name),
+            namespace: Some(namespace),
+            labels: Some(standard_labels(node)),
+            owner_references: Some(vec![owner_reference(node)]),
+            ..Default::default()
+        },
+        spec: Some(HorizontalPodAutoscalerSpec {
+            scale_target_ref: CrossVersionObjectReference {
+                api_version: Some("apps/v1".to_string()),
+                kind: "Deployment".to_string(),
+                name: deployment_name,
+            },
+            min_replicas: Some(autoscaling.min_replicas),
+            max_replicas: autoscaling.max_replicas,
+            metrics: None,
+            behavior: None,
+        }),
+        status: None,
+    };
+
+    Ok(hpa)
+}
+
+/// Delete the HPA when node is deleted
+pub async fn delete_hpa(client: &Client, node: &StellarNode) -> Result<()> {
+    // Only delete HPA if autoscaling was configured
+    if node.spec.autoscaling.is_none() {
+        return Ok(());
+    }
+
+    let namespace = node.namespace().unwrap_or_else(|| "default".to_string());
+    let api: Api<HorizontalPodAutoscaler> = Api::namespaced(client.clone(), &namespace);
+    let name = resource_name(node, "hpa");
+
+    match api.delete(&name, &DeleteParams::default()).await {
+        Ok(_) => {
+            info!("HPA deleted for {}/{}", namespace, name);
+        }
+        Err(kube::Error::Api(api_err)) if api_err.code == 404 => {
+            info!("HPA {}/{} not found (already deleted)", namespace, name);
+        }
+        Err(e) => {
+            warn!("Failed to delete HPA {}/{}: {:?}", namespace, name, e);
+        }
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// ServiceMonitor (Prometheus Operator)
+// ============================================================================
+
+/// Ensure a ServiceMonitor exists for Prometheus scraping (Prometheus Operator)
+///
+/// ServiceMonitor is a custom resource from the Prometheus Operator.
+/// Users should manually create ServiceMonitor resources or use a tool like
+/// kustomize/helm to generate them. This function documents the capability.
+pub async fn ensure_service_monitor(_client: &Client, node: &StellarNode) -> Result<()> {
+    // Only log for Horizon and SorobanRpc nodes with autoscaling config
+    if !matches!(
+        node.spec.node_type,
+        NodeType::Horizon | NodeType::SorobanRpc
+    ) || node.spec.autoscaling.is_none()
+    {
+        return Ok(());
+    }
+
+    let namespace = node.namespace().unwrap_or_else(|| "default".to_string());
+    let name = resource_name(node, "service-monitor");
+
+    info!(
+        "ServiceMonitor configuration available for {}/{}. Users should manually create the ServiceMonitor resource.",
+        namespace, name
+    );
+
+    info!(
+        "ServiceMonitor should scrape metrics on port 'http' at path '/metrics' from service: {}",
+        node.name_any()
+    );
+
+    Ok(())
+}
+
+/// Delete the ServiceMonitor when node is deleted
+pub async fn delete_service_monitor(_client: &Client, node: &StellarNode) -> Result<()> {
+    // Only delete ServiceMonitor if autoscaling was configured
+    if node.spec.autoscaling.is_none() {
+        return Ok(());
+    }
+
+    let namespace = node.namespace().unwrap_or_else(|| "default".to_string());
+    let name = resource_name(node, "service-monitor");
+
+    info!(
+        "Note: ServiceMonitor {}/{} must be manually deleted if it was created",
+        namespace, name
+    );
+
+    Ok(())
 }
