@@ -16,7 +16,7 @@ use kube::{
         finalizer::{finalizer, Event as FinalizerEvent},
         watcher::Config,
     },
-    ResourceExt,
+    Resource, ResourceExt,
 };
 use tracing::{error, info, instrument, warn};
 
@@ -188,22 +188,14 @@ async fn apply_stellar_node(client: &Client, node: &StellarNode) -> Result<Actio
     // Validate the spec
     if let Err(e) = node.spec.validate() {
         warn!("Validation failed for {}/{}: {}", namespace, name, e);
-<<<<<<< HEAD
-        update_status(client, node, "Failed", Some(&e), true).await?;
-=======
-        update_status(client, node, "Failed", Some(&e), 0).await?;
->>>>>>> upstream/main
+        update_status(client, node, "Failed", Some(&e), 0, true).await?;
         return Err(Error::ValidationError(e));
     }
 
     // Check if suspended
     if node.spec.suspended {
         info!("Node {}/{} is suspended, scaling to 0", namespace, name);
-<<<<<<< HEAD
-        update_status(client, node, "Suspended", Some("Node is suspended"), true).await?;
-=======
-        update_status(client, node, "Suspended", Some("Node is suspended"), 0).await?;
->>>>>>> upstream/main
+        update_status(client, node, "Suspended", Some("Node is suspended"), 0, true).await?;
         // Still create resources but with 0 replicas
     }
 
@@ -287,11 +279,7 @@ async fn apply_stellar_node(client: &Client, node: &StellarNode) -> Result<Actio
     }
 
     // Update status to Creating
-<<<<<<< HEAD
-    update_status(client, node, "Creating", Some("Creating resources"), true).await?;
-=======
-    update_status(client, node, "Creating", Some("Creating resources"), 0).await?;
->>>>>>> upstream/main
+    update_status(client, node, "Creating", Some("Creating resources"), 0, true).await?;
 
     // 1. Create/update the PersistentVolumeClaim
     resources::ensure_pvc(client, node).await?;
@@ -319,11 +307,6 @@ async fn apply_stellar_node(client: &Client, node: &StellarNode) -> Result<Actio
     resources::ensure_service(client, node).await?;
     info!("Service ensured for {}/{}", namespace, name);
 
-<<<<<<< HEAD
-    // 5. Update status to Running
-    let phase = if node.spec.suspended { "Suspended" } else { "Running" };
-    update_status(client, node, phase, Some("Resources created successfully"), true).await?;
-=======
     // 5. Create/update Ingress if configured
     resources::ensure_ingress(client, node).await?;
     info!("Ingress ensured for {}/{}", namespace, name);
@@ -342,20 +325,16 @@ async fn apply_stellar_node(client: &Client, node: &StellarNode) -> Result<Actio
     let ready_replicas = get_ready_replicas(client, node).await.unwrap_or(0);
 
     // 9. Update status to Running with ready replica count
-    let phase = if node.spec.suspended {
-        "Suspended"
-    } else {
-        "Running"
-    };
+    let phase = if node.spec.suspended { "Suspended" } else { "Running" };
     update_status(
         client,
         node,
         phase,
         Some("Resources created successfully"),
         ready_replicas,
+        true,
     )
     .await?;
->>>>>>> upstream/main
 
     // Requeue after 30 seconds to check node health and sync status
     Ok(Action::requeue(Duration::from_secs(30)))
@@ -474,41 +453,25 @@ async fn update_status(
     node: &StellarNode,
     phase: &str,
     message: Option<&str>,
-<<<<<<< HEAD
-    update_obs_gen: bool,
-=======
     ready_replicas: i32,
->>>>>>> upstream/main
+    update_obs_gen: bool,
 ) -> Result<()> {
     let namespace = node.namespace().unwrap_or_else(|| "default".to_string());
     let api: Api<StellarNode> = Api::namespaced(client.clone(), &namespace);
 
-<<<<<<< HEAD
     let observed_generation = if update_obs_gen {
         node.metadata.generation
     } else {
         node.status
             .as_ref()
             .and_then(|status| status.observed_generation)
-=======
-    let status = StellarNodeStatus {
-        phase: phase.to_string(),
-        message: message.map(String::from),
-        observed_generation: node.metadata.generation,
-        replicas: if node.spec.suspended {
-            0
-        } else {
-            node.spec.replicas
-        },
-        ready_replicas,
-        ..Default::default()
->>>>>>> upstream/main
     };
 
     let mut status_patch = serde_json::json!({
         "phase": phase,
         "observedGeneration": observed_generation,
         "replicas": if node.spec.suspended { 0 } else { node.spec.replicas },
+        "readyReplicas": ready_replicas,
     });
 
     if let Some(msg) = message {
