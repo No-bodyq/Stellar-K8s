@@ -23,8 +23,10 @@ use tracing::{debug, error, info, instrument, warn};
 use crate::crd::{NodeType, StellarNode, StellarNodeStatus, Condition};
 use crate::error::{Error, Result};
 
+use super::archive_health::{check_history_archive_health, calculate_backoff, ArchiveHealthResult};
 use super::finalizers::STELLAR_NODE_FINALIZER;
 use super::health;
+use super::remediation;
 use super::resources;
 use super::archive_health::{check_history_archive_health, calculate_backoff, ArchiveHealthResult};
 
@@ -274,7 +276,119 @@ async fn apply_stellar_node(client: &Client, node: &StellarNode) -> Result<Actio
         "Health check result for {}/{}: healthy={}, synced={}, message={}",
         namespace, name, health_result.healthy, health_result.synced, health_result.message
     );
-    
+
+    // 6. Auto-remediation check for stale nodes
+    // Only check if node is healthy but potentially stale (ledger not progressing)
+    if health_result.healthy && !node.spec.suspended {
+        let stale_check = remediation::check_stale_node(node, health_result.ledger_sequence);
+
+        if stale_check.is_stale {
+            warn!(
+                "Node {}/{} is stale: ledger stuck at {:?} for {:?} minutes",
+                namespace, name, stale_check.current_ledger, stale_check.minutes_since_progress
+            );
+
+            if remediation::can_remediate(node) {
+                match stale_check.recommended_action {
+                    remediation::RemediationLevel::Restart => {
+                        info!("Initiating pod restart remediation for {}/{}", namespace, name);
+
+                        // Emit event before remediation
+                        remediation::emit_remediation_event(
+                            client,
+                            node,
+                            remediation::RemediationLevel::Restart,
+                            &format!(
+                                "Ledger stuck at {} for {} minutes",
+                                stale_check.current_ledger.unwrap_or(0),
+                                stale_check.minutes_since_progress.unwrap_or(0)
+                            ),
+                        )
+                        .await?;
+
+                        // Perform restart
+                        remediation::restart_pod(client, node).await?;
+
+                        // Update remediation state
+                        remediation::update_remediation_state(
+                            client,
+                            node,
+                            stale_check.current_ledger,
+                            remediation::RemediationLevel::Restart,
+                            true,
+                        )
+                        .await?;
+
+                        // Update status
+                        update_status(
+                            client,
+                            node,
+                            "Remediating",
+                            Some("Pod restarted due to stale ledger"),
+                            0,
+                            false,
+                        )
+                        .await?;
+
+                        return Ok(Action::requeue(Duration::from_secs(30)));
+                    }
+                    remediation::RemediationLevel::ClearAndResync => {
+                        // This requires manual intervention - just emit event
+                        warn!(
+                            "Node {}/{} requires manual intervention: restart didn't help",
+                            namespace, name
+                        );
+
+                        remediation::emit_remediation_event(
+                            client,
+                            node,
+                            remediation::RemediationLevel::ClearAndResync,
+                            "Restart didn't resolve stale state. Manual database clear may be required.",
+                        )
+                        .await?;
+
+                        remediation::update_remediation_state(
+                            client,
+                            node,
+                            stale_check.current_ledger,
+                            remediation::RemediationLevel::ClearAndResync,
+                            true,
+                        )
+                        .await?;
+
+                        update_status(
+                            client,
+                            node,
+                            "Degraded",
+                            Some("Node stale after restart. Manual intervention required."),
+                            0,
+                            false,
+                        )
+                        .await?;
+
+                        return Ok(Action::requeue(Duration::from_secs(60)));
+                    }
+                    remediation::RemediationLevel::None => {}
+                }
+            } else {
+                debug!(
+                    "Remediation cooldown active for {}/{}, skipping",
+                    namespace, name
+                );
+            }
+        } else {
+            // Node is healthy - update ledger tracking
+            remediation::update_remediation_state(
+                client,
+                node,
+                health_result.ledger_sequence,
+                remediation::RemediationLevel::None,
+                false,
+            )
+            .await?;
+        }
+    }
+
     // Determine the phase based on health check
     let (phase, message) = if false {
         ("Suspended", "Node is suspended".to_string())
@@ -286,7 +400,7 @@ async fn apply_stellar_node(client: &Client, node: &StellarNode) -> Result<Actio
         ("Ready", "Node is healthy and synced".to_string())
     };
     
-    // 6. Update status with health check results
+    // 7. Update status with health check results
     update_status_with_health(client, node, phase, Some(&message), &health_result).await?;
     
     info!(
