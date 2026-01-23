@@ -313,8 +313,25 @@ async fn apply_stellar_node(client: &Client, node: &StellarNode) -> Result<Actio
     // 8. Fetch the ready replicas from Deployment/StatefulSet status
     let ready_replicas = get_ready_replicas(client, node).await.unwrap_or(0);
 
-    // 9. Update status to Running with ready replica count
-    let phase = if node.spec.suspended { "Suspended" } else { "Running" };
+    // 9. Update ledger sequence metric if available
+    if let Some(ref status) = node.status {
+        if let Some(seq) = status.ledger_sequence {
+            metrics::set_ledger_sequence(
+                &namespace,
+                &name,
+                &node.spec.node_type.to_string(),
+                node.spec.network.passphrase(),
+                seq,
+            );
+        }
+    }
+
+    // 10. Update status to Running with ready replica count
+    let phase = if node.spec.suspended {
+        "Suspended"
+    } else {
+        "Running"
+    };
     update_status(
         client,
         node,

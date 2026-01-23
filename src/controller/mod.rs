@@ -5,6 +5,7 @@
 
 mod archive_health;
 mod finalizers;
+pub mod metrics;
 mod health;
 #[cfg(test)]
 mod health_test;
