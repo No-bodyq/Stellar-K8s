@@ -31,9 +31,9 @@ const ARCHIVE_RETRIES_ANNOTATION: &str = "stellar.org/archive-health-retries";
 use super::archive_health::{calculate_backoff, check_history_archive_health, ArchiveHealthResult};
 use super::finalizers::STELLAR_NODE_FINALIZER;
 use super::health;
+use super::metrics;
 use super::remediation;
 use super::resources;
-use super::archive_health::{check_history_archive_health, calculate_backoff, ArchiveHealthResult};
 
 /// Shared state for the controller
 pub struct ControllerState {
@@ -439,7 +439,11 @@ async fn apply_stellar_node(client: &Client, node: &StellarNode) -> Result<Actio
     // 7. Create/update alerting rules
     resources::ensure_alerting(client, node).await?;
     info!("Alerting ensured for {}/{}", namespace, name);
-    // 8. Fetch the ready replicas from Deployment/StatefulSet status
+
+    // 8. Create/update NetworkPolicy if configured
+    resources::ensure_network_policy(client, node).await?;
+
+    // 9. Fetch the ready replicas from Deployment/StatefulSet status
     let ready_replicas = get_ready_replicas(client, node).await.unwrap_or(0);
 
     // 9. Update status to Running with ready replica count
@@ -512,6 +516,11 @@ async fn cleanup_stellar_node(client: &Client, node: &StellarNode) -> Result<Act
     // 3. Delete Ingress
     if let Err(e) = resources::delete_ingress(client, node).await {
         warn!("Failed to delete Ingress: {:?}", e);
+    }
+
+    // 3a. Delete NetworkPolicy
+    if let Err(e) = resources::delete_network_policy(client, node).await {
+        warn!("Failed to delete NetworkPolicy: {:?}", e);
     }
 
     // 4. Delete Service

@@ -423,3 +423,52 @@ impl Condition {
         }
     }
 }
+
+/// Network Policy configuration for securing node traffic
+///
+/// When enabled, creates a default deny-all ingress policy with explicit allow rules
+/// for peer-to-peer traffic (Validators), API access (Horizon/Soroban), and metrics.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkPolicyConfig {
+    /// Enable NetworkPolicy creation (default: false)
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Allow ingress from specific namespaces (by namespace name)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_namespaces: Vec<String>,
+
+    /// Allow ingress from pods matching these labels
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_pod_selector: Option<BTreeMap<String, String>>,
+
+    /// Allow ingress from specific CIDR blocks (e.g., ["10.0.0.0/8"])
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_cidrs: Vec<String>,
+
+    /// Allow metrics scraping from monitoring namespace (default: true when enabled)
+    #[serde(default = "default_true")]
+    pub allow_metrics_scrape: bool,
+
+    /// Namespace where Prometheus/monitoring stack runs (default: "monitoring")
+    #[serde(default = "default_monitoring_namespace")]
+    pub metrics_namespace: String,
+}
+
+fn default_monitoring_namespace() -> String {
+    "monitoring".to_string()
+}
+
+impl Default for NetworkPolicyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            allow_namespaces: Vec::new(),
+            allow_pod_selector: None,
+            allow_cidrs: Vec::new(),
+            allow_metrics_scrape: true,
+            metrics_namespace: default_monitoring_namespace(),
+        }
+    }
+}

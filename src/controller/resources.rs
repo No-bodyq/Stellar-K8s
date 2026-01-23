@@ -18,6 +18,8 @@ use k8s_openapi::api::core::v1::{
 use k8s_openapi::api::networking::v1::{
     HTTPIngressPath, HTTPIngressRuleValue, Ingress, IngressBackend, IngressRule,
     IngressServiceBackend, IngressSpec, IngressTLS, ServiceBackendPort,
+    IPBlock, NetworkPolicy, NetworkPolicyIngressRule, NetworkPolicyPeer, NetworkPolicyPort,
+    NetworkPolicySpec,
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta, OwnerReference};
@@ -25,7 +27,7 @@ use kube::api::{Api, DeleteParams, Patch, PatchParams, PostParams};
 use kube::{Client, Resource, ResourceExt};
 use tracing::{info, warn, instrument};
 
-use crate::crd::{IngressConfig, KeySource, NodeType, StellarNode};
+use crate::crd::{IngressConfig, KeySource, NetworkPolicyConfig, NodeType, StellarNode};
 use crate::error::{Error, Result};
 
 /// Get the standard labels for a StellarNode's resources
@@ -1099,6 +1101,206 @@ pub async fn delete_alerting(client: &Client, node: &StellarNode) -> Result<()> 
         Ok(_) => info!("Deleted alerting ConfigMap {}", name),
         Err(kube::Error::Api(e)) if e.code == 404 => {
             // Already gone
+        }
+        Err(e) => return Err(Error::KubeError(e)),
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// NetworkPolicy
+// ============================================================================
+
+/// Ensure a NetworkPolicy exists for the node when configured
+#[instrument(skip(client, node), fields(name = %node.name_any(), namespace = node.namespace()))]
+pub async fn ensure_network_policy(client: &Client, node: &StellarNode) -> Result<()> {
+    let policy_cfg = match &node.spec.network_policy {
+        Some(cfg) if cfg.enabled => cfg,
+        _ => return Ok(()),
+    };
+
+    let namespace = node.namespace().unwrap_or_else(|| "default".to_string());
+    let api: Api<NetworkPolicy> = Api::namespaced(client.clone(), &namespace);
+    let name = resource_name(node, "netpol");
+
+    let network_policy = build_network_policy(node, policy_cfg);
+
+    api.patch(
+        &name,
+        &PatchParams::apply("stellar-operator").force(),
+        &Patch::Apply(&network_policy),
+    )
+    .await?;
+
+    info!("NetworkPolicy ensured for {}/{}", namespace, name);
+    Ok(())
+}
+
+fn build_network_policy(node: &StellarNode, config: &NetworkPolicyConfig) -> NetworkPolicy {
+    let labels = standard_labels(node);
+    let name = resource_name(node, "netpol");
+
+    let mut ingress_rules: Vec<NetworkPolicyIngressRule> = Vec::new();
+
+    // Determine ports based on node type
+    let app_ports = match node.spec.node_type {
+        NodeType::Validator => vec![
+            NetworkPolicyPort {
+                port: Some(k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(11625)),
+                protocol: Some("TCP".to_string()),
+                ..Default::default()
+            },
+            NetworkPolicyPort {
+                port: Some(k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(11626)),
+                protocol: Some("TCP".to_string()),
+                ..Default::default()
+            },
+        ],
+        NodeType::Horizon | NodeType::SorobanRpc => vec![NetworkPolicyPort {
+            port: Some(k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(8000)),
+            protocol: Some("TCP".to_string()),
+            ..Default::default()
+        }],
+    };
+
+    // Allow from specified namespaces
+    if !config.allow_namespaces.is_empty() {
+        let peers: Vec<NetworkPolicyPeer> = config
+            .allow_namespaces
+            .iter()
+            .map(|ns| NetworkPolicyPeer {
+                namespace_selector: Some(LabelSelector {
+                    match_labels: Some(BTreeMap::from([(
+                        "kubernetes.io/metadata.name".to_string(),
+                        ns.clone(),
+                    )])),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .collect();
+
+        ingress_rules.push(NetworkPolicyIngressRule {
+            from: Some(peers),
+            ports: Some(app_ports.clone()),
+        });
+    }
+
+    // Allow from specified pod selectors
+    if let Some(pod_labels) = &config.allow_pod_selector {
+        ingress_rules.push(NetworkPolicyIngressRule {
+            from: Some(vec![NetworkPolicyPeer {
+                pod_selector: Some(LabelSelector {
+                    match_labels: Some(pod_labels.clone()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]),
+            ports: Some(app_ports.clone()),
+        });
+    }
+
+    // Allow from specified CIDRs
+    if !config.allow_cidrs.is_empty() {
+        let peers: Vec<NetworkPolicyPeer> = config
+            .allow_cidrs
+            .iter()
+            .map(|cidr| NetworkPolicyPeer {
+                ip_block: Some(IPBlock {
+                    cidr: cidr.clone(),
+                    except: None,
+                }),
+                ..Default::default()
+            })
+            .collect();
+
+        ingress_rules.push(NetworkPolicyIngressRule {
+            from: Some(peers),
+            ports: Some(app_ports.clone()),
+        });
+    }
+
+    // Allow metrics scraping from monitoring namespace
+    if config.allow_metrics_scrape {
+        ingress_rules.push(NetworkPolicyIngressRule {
+            from: Some(vec![NetworkPolicyPeer {
+                namespace_selector: Some(LabelSelector {
+                    match_labels: Some(BTreeMap::from([(
+                        "kubernetes.io/metadata.name".to_string(),
+                        config.metrics_namespace.clone(),
+                    )])),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]),
+            ports: Some(vec![NetworkPolicyPort {
+                port: Some(k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(9090)),
+                protocol: Some("TCP".to_string()),
+                ..Default::default()
+            }]),
+        });
+    }
+
+    // For Validators, allow peer-to-peer from other validators in the same namespace
+    if node.spec.node_type == NodeType::Validator {
+        ingress_rules.push(NetworkPolicyIngressRule {
+            from: Some(vec![NetworkPolicyPeer {
+                pod_selector: Some(LabelSelector {
+                    match_labels: Some(BTreeMap::from([(
+                        "app.kubernetes.io/name".to_string(),
+                        "stellar-node".to_string(),
+                    )])),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]),
+            ports: Some(vec![NetworkPolicyPort {
+                port: Some(k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(11625)),
+                protocol: Some("TCP".to_string()),
+                ..Default::default()
+            }]),
+        });
+    }
+
+    NetworkPolicy {
+        metadata: ObjectMeta {
+            name: Some(name),
+            namespace: node.namespace(),
+            labels: Some(labels),
+            owner_references: Some(vec![owner_reference(node)]),
+            ..Default::default()
+        },
+        spec: Some(NetworkPolicySpec {
+            pod_selector: LabelSelector {
+                match_labels: Some(BTreeMap::from([
+                    ("app.kubernetes.io/instance".to_string(), node.name_any()),
+                    ("app.kubernetes.io/name".to_string(), "stellar-node".to_string()),
+                ])),
+                ..Default::default()
+            },
+            policy_types: Some(vec!["Ingress".to_string()]),
+            ingress: if ingress_rules.is_empty() {
+                None
+            } else {
+                Some(ingress_rules)
+            },
+            egress: None,
+        }),
+    }
+}
+
+/// Delete the NetworkPolicy for a node
+#[instrument(skip(client, node), fields(name = %node.name_any(), namespace = node.namespace()))]
+pub async fn delete_network_policy(client: &Client, node: &StellarNode) -> Result<()> {
+    let namespace = node.namespace().unwrap_or_else(|| "default".to_string());
+    let api: Api<NetworkPolicy> = Api::namespaced(client.clone(), &namespace);
+    let name = resource_name(node, "netpol");
+
+    match api.delete(&name, &DeleteParams::default()).await {
+        Ok(_) => info!("NetworkPolicy {} deleted", name),
+        Err(kube::Error::Api(e)) if e.code == 404 => {
+            info!("NetworkPolicy {} not found, skipping delete", name);
         }
         Err(e) => return Err(Error::KubeError(e)),
     }

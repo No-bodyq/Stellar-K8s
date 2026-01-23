@@ -29,7 +29,9 @@ scripts/
 .agents/
 .cursor/
 .gemini/
+.windsurf/
 task_plan.md
 findings.md
 progress.md
 issue-*-requirement.md
+requirements.md

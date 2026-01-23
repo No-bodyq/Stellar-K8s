@@ -8,9 +8,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::types::{
-    AutoscalingConfig, Condition, ExternalDatabaseConfig, HorizonConfig, IngressConfig, NodeType,
-    ResourceRequirements, RetentionPolicy, SorobanConfig, StellarNetwork, StorageConfig,
-    ValidatorConfig,
+    AutoscalingConfig, Condition, ExternalDatabaseConfig, HorizonConfig, IngressConfig,
+    NetworkPolicyConfig, NodeType, ResourceRequirements, RetentionPolicy, SorobanConfig,
+    StellarNetwork, StorageConfig, ValidatorConfig,
 };
 
 /// The StellarNode CRD represents a managed Stellar infrastructure node.
@@ -120,6 +120,12 @@ pub struct StellarNodeSpec {
     /// Ingress configuration for HTTPS exposure via an ingress controller and cert-manager
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ingress: Option<IngressConfig>,
+
+    /// Network Policy configuration for restricting ingress traffic
+    /// When enabled, creates a deny-all policy with explicit allow rules
+    /// for peer-to-peer (Validators), API access (Horizon/Soroban), and metrics
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network_policy: Option<NetworkPolicyConfig>,
 }
 
 fn default_replicas() -> i32 {
