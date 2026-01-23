@@ -11,4 +11,7 @@ pub mod telemetry;
 #[cfg(feature = "rest-api")]
 pub mod rest_api;
 
+#[cfg(feature = "admission-webhook")]
+pub mod webhook;
+
 pub use crate::error::{Error, Result};
