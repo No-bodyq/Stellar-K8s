@@ -3,7 +3,7 @@ name: CI/CD Pipeline
 on:
   push:
     branches: [main, develop]
-    tags: ["v*"]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -102,7 +102,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-
+    
     steps:
       - uses: actions/checkout@v6
 
@@ -172,4 +172,4 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: "trivy-results.sarif"
+          sarif_file: 'trivy-results.sarif'

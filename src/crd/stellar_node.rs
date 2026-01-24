@@ -377,6 +377,8 @@ fn validate_ingress(ingress: &IngressConfig) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
+#[allow(dead_code)]
 fn validate_load_balancer(lb: &LoadBalancerConfig) -> Result<(), String> {
     use super::types::LoadBalancerMode;
 
@@ -424,6 +426,8 @@ fn validate_load_balancer(lb: &LoadBalancerConfig) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
+#[allow(dead_code)]
 fn validate_global_discovery(gd: &GlobalDiscoveryConfig) -> Result<(), String> {
     if !gd.enabled {
         return Ok(());
@@ -540,7 +544,6 @@ pub struct BGPStatus {
 impl StellarNodeStatus {
     /// Create a new status with the given phase
     ///
-
     /// Initializes a StellarNodeStatus with the provided phase and all other fields
     /// set to their defaults (empty message, no conditions, etc.).
     ///
@@ -566,7 +569,6 @@ impl StellarNodeStatus {
 
     /// Update the phase and message
     ///
-
     /// Updates both the phase and message fields atomically.
     /// This is typically called during reconciliation to report progress.
     ///
@@ -593,7 +595,6 @@ impl StellarNodeStatus {
         self.phase = phase.to_string();
         self.message = message.map(String::from);
     }
-
 
     /// Check if the node is ready
     ///

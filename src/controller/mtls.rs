@@ -12,8 +12,8 @@ use kube::{
     Client, Resource, ResourceExt,
 };
 use rcgen::{
-    Certificate, CertificateParams, DistinguishedName, ExtendedKeyUsagePurpose, Ia5String, IsCa,
-    KeyPair, KeyUsagePurpose, SanType,
+    CertificateParams, DistinguishedName, ExtendedKeyUsagePurpose, Ia5String, IsCa, KeyPair,
+    KeyUsagePurpose, SanType,
 };
 use std::collections::BTreeMap;
 

@@ -41,7 +41,6 @@ struct CachedModule {
 /// Store state for Wasm execution
 struct PluginState {
     wasi: WasiCtx,
-    limits: StoreLimits,
     input_buffer: Vec<u8>,
     output_buffer: Vec<u8>,
 }
@@ -280,7 +279,6 @@ impl WasmRuntime {
 
         let state = PluginState {
             wasi,
-            limits: store_limits,
             input_buffer: input_json,
             output_buffer: Vec::with_capacity(4096),
         };
@@ -378,7 +376,10 @@ impl WasmRuntime {
                     let input = caller.data().input_buffer.clone();
                     let read_len = std::cmp::min(len as usize, input.len());
 
-                    if let Err(_) = memory.write(&mut caller, ptr as usize, &input[..read_len]) {
+                    if memory
+                        .write(&mut caller, ptr as usize, &input[..read_len])
+                        .is_err()
+                    {
                         return -1;
                     }
 
@@ -399,7 +400,7 @@ impl WasmRuntime {
                     };
 
                     let mut buffer = vec![0u8; len as usize];
-                    if let Err(_) = memory.read(&caller, ptr as usize, &mut buffer) {
+                    if memory.read(&caller, ptr as usize, &mut buffer).is_err() {
                         return -1;
                     }
 

@@ -547,6 +547,7 @@ pub async fn ensure_load_balancer_service(client: &Client, node: &StellarNode) -
     */
 }
 
+#[allow(dead_code)]
 fn build_load_balancer_service(node: &StellarNode, config: &LoadBalancerConfig) -> Service {
     let labels = standard_labels(node);
     let name = resource_name(node, "lb");
@@ -703,6 +704,7 @@ fn build_load_balancer_service(node: &StellarNode, config: &LoadBalancerConfig) 
 
 /// Delete the LoadBalancer Service for a node
 #[instrument(skip(client, node), fields(name = %node.name_any(), namespace = node.namespace()))]
+#[allow(dead_code)]
 pub async fn delete_load_balancer_service(client: &Client, node: &StellarNode) -> Result<()> {
     // TODO: load_balancer field not yet implemented in StellarNodeSpec
     #[allow(unreachable_code)]
@@ -738,6 +740,7 @@ pub async fn delete_load_balancer_service(client: &Client, node: &StellarNode) -
 /// Note: MetalLB CRDs must be created manually or via Helm; this function
 /// creates the recommended ConfigMap for cluster operators to reference.
 #[instrument(skip(client, node), fields(name = %node.name_any(), namespace = node.namespace()))]
+#[allow(dead_code)]
 pub async fn ensure_metallb_config(client: &Client, node: &StellarNode) -> Result<()> {
     // TODO: load_balancer field not yet implemented in StellarNodeSpec
     #[allow(unreachable_code)]
@@ -771,6 +774,7 @@ pub async fn ensure_metallb_config(client: &Client, node: &StellarNode) -> Resul
     */
 }
 
+#[allow(dead_code)]
 fn build_metallb_config_map(node: &StellarNode, config: &LoadBalancerConfig) -> ConfigMap {
     let labels = standard_labels(node);
     let name = resource_name(node, "metallb-config");
@@ -1004,6 +1008,7 @@ spec:
 
 /// Delete the MetalLB configuration ConfigMap
 #[instrument(skip(client, node), fields(name = %node.name_any(), namespace = node.namespace()))]
+#[allow(dead_code)]
 pub async fn delete_metallb_config(client: &Client, node: &StellarNode) -> Result<()> {
     let namespace = node.namespace().unwrap_or_else(|| "default".to_string());
     let api: Api<ConfigMap> = Api::namespaced(client.clone(), &namespace);
@@ -1127,7 +1132,6 @@ fn build_ingress(node: &StellarNode, config: &IngressConfig) -> Ingress {
         vec![IngressTLS {
             hosts: Some(config.hosts.iter().map(|h| h.host.clone()).collect()),
             secret_name: Some(secret.clone()),
-            ..Default::default()
         }]
     });
 
