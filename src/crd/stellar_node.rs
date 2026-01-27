@@ -12,7 +12,7 @@ use super::types::{
     AutoscalingConfig, Condition, DisasterRecoveryConfig, DisasterRecoveryStatus,
     ExternalDatabaseConfig, GlobalDiscoveryConfig, HorizonConfig, IngressConfig,
     LoadBalancerConfig, NetworkPolicyConfig, NodeType, ResourceRequirements, RetentionPolicy,
-    SorobanConfig, StellarNetwork, StorageConfig, ValidatorConfig,
+    RolloutStrategy, SorobanConfig, StellarNetwork, StorageConfig, ValidatorConfig,
 };
 
 /// The StellarNode CRD represents a managed Stellar infrastructure node.
@@ -135,9 +135,14 @@ pub struct StellarNodeSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ingress: Option<IngressConfig>,
 
+    /// Rollout strategy for updates (RollingUpdate or Canary)
+    #[serde(default)]
+    pub strategy: RolloutStrategy,
+
     /// Maintenance mode (skips workload updates)
     #[serde(default)]
     pub maintenance_mode: bool,
+
     /// Network Policy configuration for restricting ingress traffic
     /// When enabled, creates a deny-all policy with explicit allow rules
     /// for peer-to-peer (Validators), API access (Horizon/Soroban), and metrics
@@ -187,11 +192,14 @@ impl StellarNodeSpec {
     /// # horizon_config: None,
     /// # soroban_config: None,
     /// # replicas: 1,
+    /// # min_available: None,
+    /// # max_unavailable: None,
     /// # suspended: false,
     /// # alerting: false,
     /// # database: None,
     /// # autoscaling: None,
     /// # ingress: None,
+    /// # strategy: Default::default(),
     /// # maintenance_mode: false,
     /// # network_policy: None,
     /// # dr_config: None,
@@ -233,6 +241,9 @@ impl StellarNodeSpec {
                 }
                 if self.ingress.is_some() {
                     return Err("ingress is not supported for Validator nodes".to_string());
+                }
+                if matches!(self.strategy, RolloutStrategy::Canary(_)) {
+                    return Err("Canary rollout is not supported for Validator nodes".to_string());
                 }
             }
             NodeType::Horizon => {
@@ -315,11 +326,14 @@ impl StellarNodeSpec {
     /// # horizon_config: None,
     /// # soroban_config: None,
     /// # replicas: 1,
+    /// # min_available: None,
+    /// # max_unavailable: None,
     /// # suspended: false,
     /// # alerting: false,
     /// # database: None,
     /// # autoscaling: None,
     /// # ingress: None,
+    /// # strategy: Default::default(),
     /// # maintenance_mode: false,
     /// # network_policy: None,
     /// # dr_config: None,
@@ -365,11 +379,14 @@ impl StellarNodeSpec {
     /// # horizon_config: None,
     /// # soroban_config: None,
     /// # replicas: 1,
+    /// # min_available: None,
+    /// # max_unavailable: None,
     /// # suspended: false,
     /// # alerting: false,
     /// # database: None,
     /// # autoscaling: None,
     /// # ingress: None,
+    /// # strategy: Default::default(),
     /// # maintenance_mode: false,
     /// # network_policy: None,
     /// # dr_config: None,
@@ -555,6 +572,14 @@ pub struct StellarNodeStatus {
     #[serde(default)]
     pub replicas: i32,
 
+    /// Current number of ready canary replicas (for canary deployments)
+    #[serde(default)]
+    pub canary_ready_replicas: i32,
+
+    /// Version deployed in the canary deployment (if active)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canary_version: Option<String>,
+
     /// Version of the database schema after last successful migration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_migrated_version: Option<String>,
@@ -715,5 +740,95 @@ impl StellarNodeStatus {
                 "Pending".to_string()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crd::types::{CanaryConfig, RolloutStrategy};
+
+    #[test]
+    fn test_validator_with_canary_should_fail() {
+        let spec = StellarNodeSpec {
+            node_type: NodeType::Validator,
+            network: StellarNetwork::Testnet,
+            version: "v21.0.0".to_string(),
+            resources: Default::default(),
+            storage: Default::default(),
+            validator_config: Some(ValidatorConfig {
+                seed_secret_ref: "test".to_string(),
+                quorum_set: None,
+                enable_history_archive: false,
+                history_archive_urls: vec![],
+                catchup_complete: false,
+                key_source: Default::default(),
+                kms_config: None,
+                vl_source: None,
+            }),
+            horizon_config: None,
+            soroban_config: None,
+            replicas: 1,
+            min_available: None,
+            max_unavailable: None,
+            suspended: false,
+            alerting: false,
+            database: None,
+            autoscaling: None,
+            ingress: None,
+            strategy: RolloutStrategy::Canary(CanaryConfig {
+                weight: 10,
+                check_interval_seconds: 300,
+            }),
+            maintenance_mode: false,
+            network_policy: None,
+            dr_config: None,
+            topology_spread_constraints: None,
+        };
+
+        assert!(spec.validate().is_err());
+        assert_eq!(
+            spec.validate().unwrap_err(),
+            "Canary rollout is not supported for Validator nodes"
+        );
+    }
+
+    #[test]
+    fn test_horizon_with_canary_should_pass() {
+        let spec = StellarNodeSpec {
+            node_type: NodeType::Horizon,
+            network: StellarNetwork::Testnet,
+            version: "v21.0.0".to_string(),
+            resources: Default::default(),
+            storage: Default::default(),
+            validator_config: None,
+            horizon_config: Some(HorizonConfig {
+                database_secret_ref: "test".to_string(),
+                enable_ingest: true,
+                stellar_core_url: "http://core".to_string(),
+                ingest_workers: 1,
+                enable_experimental_ingestion: false,
+                auto_migration: false,
+            }),
+            soroban_config: None,
+            replicas: 3,
+            min_available: None,
+            max_unavailable: None,
+            suspended: false,
+            alerting: false,
+            database: None,
+            autoscaling: None,
+            ingress: None,
+            strategy: RolloutStrategy::Canary(CanaryConfig {
+                weight: 20,
+                check_interval_seconds: 300,
+            }),
+            maintenance_mode: false,
+            network_policy: None,
+            dr_config: None,
+            topology_spread_constraints: None,
+        };
+
+        assert!(spec.validate().is_ok());
     }
 }
