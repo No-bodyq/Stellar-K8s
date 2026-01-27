@@ -515,6 +515,8 @@ async fn apply_stellar_node(
     resources::ensure_alerting(client, node).await?;
     resources::ensure_network_policy(client, node).await?;
 
+    // 7. Perform health check to determine if node is ready
+    let health_result = health::check_node_health(client, node, ctx.mtls_config.as_ref()).await?;
 
     debug!(
         "Health check result for {}/{}: healthy={}, synced={}, message={}",

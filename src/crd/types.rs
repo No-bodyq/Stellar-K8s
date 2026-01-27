@@ -19,7 +19,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Supported Stellar node types
-
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub enum NodeType {
     /// Full validator node running Stellar Core
     /// Participates in consensus and validates transactions

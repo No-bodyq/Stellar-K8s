@@ -623,8 +623,9 @@ fn build_service(node: &StellarNode, enable_mtls: bool) -> Service {
 // ============================================================================
 
 /// Ensure a LoadBalancer Service exists for external access via MetalLB
-
-pub async fn ensure_load_balancer_service(_client: &Client, node: &StellarNode) -> Result<()> {
+#[allow(dead_code)]
+#[instrument(skip(_client, _node), fields(name = %_node.name_any(), namespace = _node.namespace()))]
+pub async fn ensure_load_balancer_service(_client: &Client, _node: &StellarNode) -> Result<()> {
     // TODO: load_balancer field not yet implemented in StellarNodeSpec
     // Uncomment when LoadBalancerConfig is added to the spec
     /*
@@ -815,8 +816,9 @@ fn build_load_balancer_service(node: &StellarNode, config: &LoadBalancerConfig) 
 }
 
 /// Delete the LoadBalancer Service for a node
-
-pub async fn delete_load_balancer_service(_client: &Client, node: &StellarNode) -> Result<()> {
+#[allow(dead_code)]
+#[instrument(skip(_client, _node), fields(name = %_node.name_any(), namespace = _node.namespace()))]
+pub async fn delete_load_balancer_service(_client: &Client, _node: &StellarNode) -> Result<()> {
     // TODO: load_balancer field not yet implemented in StellarNodeSpec
     #[allow(unreachable_code)]
     {
@@ -850,8 +852,9 @@ pub async fn delete_load_balancer_service(_client: &Client, node: &StellarNode) 
 /// Ensure MetalLB BGPAdvertisement and IPAddressPool ConfigMaps are documented
 /// Note: MetalLB CRDs must be created manually or via Helm; this function
 /// creates the recommended ConfigMap for cluster operators to reference.
-
-pub async fn ensure_metallb_config(_client: &Client, node: &StellarNode) -> Result<()> {
+#[allow(dead_code)]
+#[instrument(skip(_client, _node), fields(name = %_node.name_any(), namespace = _node.namespace()))]
+pub async fn ensure_metallb_config(_client: &Client, _node: &StellarNode) -> Result<()> {
     // TODO: load_balancer field not yet implemented in StellarNodeSpec
     #[allow(unreachable_code)]
     {

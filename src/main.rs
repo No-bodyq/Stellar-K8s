@@ -136,7 +136,8 @@ async fn main() -> Result<(), Error> {
     let peer_discovery_client = client.clone();
     let peer_discovery_config = controller::PeerDiscoveryConfig::default();
     tokio::spawn(async move {
-        let manager = controller::PeerDiscoveryManager::new(peer_discovery_client, peer_discovery_config);
+        let manager =
+            controller::PeerDiscoveryManager::new(peer_discovery_client, peer_discovery_config);
         if let Err(e) = manager.run().await {
             tracing::error!("Peer discovery manager error: {:?}", e);
         }

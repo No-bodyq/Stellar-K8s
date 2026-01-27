@@ -623,7 +623,6 @@ impl StellarNodeStatus {
     #[deprecated(since = "0.2.0", note = "Use with_conditions instead")]
     #[allow(deprecated)]
     pub fn with_phase(phase: &str) -> Self {
-        #[allow(deprecated)]
         Self {
             phase: phase.to_string(),
             ..Default::default()

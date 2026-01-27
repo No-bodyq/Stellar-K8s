@@ -99,43 +99,39 @@ impl PeerDiscoveryManager {
 
         let stellar_nodes: Api<StellarNode> = Api::all(self.client.clone());
         let mut last_peers: HashSet<PeerInfo> = HashSet::new();
-        let mut last_update = std::time::Instant::now();
 
         loop {
-            // Poll for nodes every 30 seconds
-            if last_update.elapsed() > Duration::from_secs(30) {
-                match stellar_nodes.list(&Default::default()).await {
-                    Ok(nodes) => {
-                        let mut current_peers = HashSet::new();
+            // Poll for nodes
+            match stellar_nodes.list(&Default::default()).await {
+                Ok(nodes) => {
+                    let mut current_peers = HashSet::new();
 
-                        for node in nodes.items {
-                            if let Err(e) = self.process_node_event(&node, &mut current_peers).await {
-                                debug!("Error processing node {}: {}", node.name_any(), e);
-                            }
-                        }
-
-                        // Check if peers changed
-                        if current_peers != last_peers {
-                            info!(
-                                "Peer list changed: {} -> {} peers",
-                                last_peers.len(),
-                                current_peers.len()
-                            );
-                            if let Err(e) = self.update_peers_config_map(&current_peers).await {
-                                error!("Failed to update peers ConfigMap: {}", e);
-                            }
-                            last_peers = current_peers;
+                    for node in nodes.items {
+                        if let Err(e) = self.process_node_event(&node, &mut current_peers).await {
+                            debug!("Error processing node {}: {}", node.name_any(), e);
                         }
                     }
-                    Err(e) => {
-                        error!("Failed to list StellarNodes: {}", e);
+
+                    // Check if peers changed
+                    if current_peers != last_peers {
+                        info!(
+                            "Peer list changed: {} -> {} peers",
+                            last_peers.len(),
+                            current_peers.len()
+                        );
+                        if let Err(e) = self.update_peers_config_map(&current_peers).await {
+                            error!("Failed to update peers ConfigMap: {}", e);
+                        }
+                        last_peers = current_peers;
                     }
                 }
-                last_update = std::time::Instant::now();
+                Err(e) => {
+                    error!("Failed to list StellarNodes: {}", e);
+                }
             }
 
-            // Sleep for a bit before next check
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            // Sleep for 30 seconds before the next poll cycle
+            tokio::time::sleep(Duration::from_secs(30)).await;
         }
     }
 
@@ -208,10 +204,7 @@ impl PeerDiscoveryManager {
                     }
                 }
 
-                debug!(
-                    "Service {} found but no IP available yet",
-                    service_name
-                );
+                debug!("Service {} found but no IP available yet", service_name);
                 Ok(None)
             }
             Err(kube::Error::Api(e)) if e.code == 404 => {
@@ -228,39 +221,24 @@ impl PeerDiscoveryManager {
     /// Update the shared peers ConfigMap with current peer list
     #[instrument(skip(self, peers))]
     async fn update_peers_config_map(&self, peers: &HashSet<PeerInfo>) -> Result<()> {
-        let api: Api<ConfigMap> = Api::namespaced(
-            self.client.clone(),
-            &self.config.config_namespace,
-        );
+        let api: Api<ConfigMap> =
+            Api::namespaced(self.client.clone(), &self.config.config_namespace);
 
         let mut data = BTreeMap::new();
 
         // Add peers as JSON array
-        let peers_json: Vec<serde_json::Value> = peers
-            .iter()
-            .map(|p| p.to_json())
-            .collect();
+        let peers_json: Vec<serde_json::Value> = peers.iter().map(|p| p.to_json()).collect();
         data.insert(
             "peers.json".to_string(),
-            serde_json::to_string_pretty(&peers_json)
-                .unwrap_or_else(|_| "[]".to_string()),
+            serde_json::to_string_pretty(&peers_json).unwrap_or_else(|_| "[]".to_string()),
         );
 
         // Add peers as simple list (ip:port format)
-        let peers_list: Vec<String> = peers
-            .iter()
-            .map(|p| p.to_peer_string())
-            .collect();
-        data.insert(
-            "peers.txt".to_string(),
-            peers_list.join("\n"),
-        );
+        let peers_list: Vec<String> = peers.iter().map(|p| p.to_peer_string()).collect();
+        data.insert("peers.txt".to_string(), peers_list.join("\n"));
 
         // Add peer count
-        data.insert(
-            "peer_count".to_string(),
-            peers.len().to_string(),
-        );
+        data.insert("peer_count".to_string(), peers.len().to_string());
 
         let cm = ConfigMap {
             metadata: kube::api::ObjectMeta {
@@ -286,10 +264,7 @@ impl PeerDiscoveryManager {
         )
         .await?;
 
-        info!(
-            "Updated peers ConfigMap with {} peers",
-            peers.len()
-        );
+        info!("Updated peers ConfigMap with {} peers", peers.len());
 
         Ok(())
     }
@@ -300,10 +275,7 @@ pub async fn get_peers_from_config_map(
     client: &Client,
     config: &PeerDiscoveryConfig,
 ) -> Result<Vec<PeerInfo>> {
-    let api: Api<ConfigMap> = Api::namespaced(
-        client.clone(),
-        &config.config_namespace,
-    );
+    let api: Api<ConfigMap> = Api::namespaced(client.clone(), &config.config_namespace);
 
     match api.get(&config.config_map_name).await {
         Ok(cm) => {
@@ -347,16 +319,12 @@ pub async fn get_peers_from_config_map(
 }
 
 /// Trigger configuration reload for a specific node
-pub async fn trigger_peer_config_reload(
-    client: &Client,
-    node: &StellarNode,
-) -> Result<()> {
+pub async fn trigger_peer_config_reload(client: &Client, node: &StellarNode) -> Result<()> {
     let namespace = node.namespace().unwrap_or_else(|| "default".to_string());
     let name = node.name_any();
 
     // Get the pod to find its IP
-    let pods: Api<k8s_openapi::api::core::v1::Pod> =
-        Api::namespaced(client.clone(), &namespace);
+    let pods: Api<k8s_openapi::api::core::v1::Pod> = Api::namespaced(client.clone(), &namespace);
 
     let label_selector = format!("app={}", name);
     let params = ListParams::default().labels(&label_selector);
@@ -396,11 +364,7 @@ async fn trigger_config_reload_http(pod_ip: &str) -> Result<()> {
         .build()
         .map_err(|e| Error::ConfigError(format!("Failed to build HTTP client: {}", e)))?;
 
-    let response = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(Error::HttpError)?;
+    let response = client.get(&url).send().await.map_err(Error::HttpError)?;
 
     if !response.status().is_success() {
         return Err(Error::ConfigError(format!(

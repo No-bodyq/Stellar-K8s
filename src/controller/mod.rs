@@ -21,8 +21,8 @@ pub use archive_health::{calculate_backoff, check_history_archive_health, Archiv
 pub use finalizers::STELLAR_NODE_FINALIZER;
 pub use health::{check_node_health, HealthCheckResult};
 pub use peer_discovery::{
-    get_peers_from_config_map, trigger_peer_config_reload, PeerDiscoveryConfig, PeerDiscoveryManager,
-    PeerInfo,
+    get_peers_from_config_map, trigger_peer_config_reload, PeerDiscoveryConfig,
+    PeerDiscoveryManager, PeerInfo,
 };
 pub use reconciler::{run_controller, ControllerState};
 pub use remediation::{can_remediate, check_stale_node, RemediationLevel, StaleCheckResult};
