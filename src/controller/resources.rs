@@ -31,8 +31,8 @@ use kube::{Client, Resource, ResourceExt};
 use tracing::{info, instrument, warn};
 
 use crate::crd::{
-    ExternalTrafficPolicy, IngressConfig, KeySource, LoadBalancerConfig, LoadBalancerMode,
-    NetworkPolicyConfig, NodeType, RolloutStrategy, StellarNode,
+    ExternalTrafficPolicy, HsmProvider, IngressConfig, KeySource, LoadBalancerConfig,
+    LoadBalancerMode, NetworkPolicyConfig, NodeType, RolloutStrategy, StellarNode,
 };
 use crate::error::{Error, Result};
 
@@ -623,9 +623,9 @@ fn build_service(node: &StellarNode, enable_mtls: bool) -> Service {
 // ============================================================================
 
 /// Ensure a LoadBalancer Service exists for external access via MetalLB
-#[instrument(skip(_client, node), fields(name = %node.name_any(), namespace = node.namespace()))]
 #[allow(dead_code)]
-pub async fn ensure_load_balancer_service(_client: &Client, node: &StellarNode) -> Result<()> {
+#[instrument(skip(_client, _node), fields(name = %_node.name_any(), namespace = _node.namespace()))]
+pub async fn ensure_load_balancer_service(_client: &Client, _node: &StellarNode) -> Result<()> {
     // TODO: load_balancer field not yet implemented in StellarNodeSpec
     // Uncomment when LoadBalancerConfig is added to the spec
     /*
@@ -816,9 +816,9 @@ fn build_load_balancer_service(node: &StellarNode, config: &LoadBalancerConfig) 
 }
 
 /// Delete the LoadBalancer Service for a node
-#[instrument(skip(_client, node), fields(name = %node.name_any(), namespace = node.namespace()))]
 #[allow(dead_code)]
-pub async fn delete_load_balancer_service(_client: &Client, node: &StellarNode) -> Result<()> {
+#[instrument(skip(_client, _node), fields(name = %_node.name_any(), namespace = _node.namespace()))]
+pub async fn delete_load_balancer_service(_client: &Client, _node: &StellarNode) -> Result<()> {
     // TODO: load_balancer field not yet implemented in StellarNodeSpec
     #[allow(unreachable_code)]
     {
@@ -852,9 +852,9 @@ pub async fn delete_load_balancer_service(_client: &Client, node: &StellarNode) 
 /// Ensure MetalLB BGPAdvertisement and IPAddressPool ConfigMaps are documented
 /// Note: MetalLB CRDs must be created manually or via Helm; this function
 /// creates the recommended ConfigMap for cluster operators to reference.
-#[instrument(skip(_client, node), fields(name = %node.name_any(), namespace = node.namespace()))]
 #[allow(dead_code)]
-pub async fn ensure_metallb_config(_client: &Client, node: &StellarNode) -> Result<()> {
+#[instrument(skip(_client, _node), fields(name = %_node.name_any(), namespace = _node.namespace()))]
+pub async fn ensure_metallb_config(_client: &Client, _node: &StellarNode) -> Result<()> {
     // TODO: load_balancer field not yet implemented in StellarNodeSpec
     #[allow(unreachable_code)]
     {
@@ -1120,8 +1120,8 @@ spec:
 }
 
 /// Delete the MetalLB configuration ConfigMap
-#[instrument(skip(client, node), fields(name = %node.name_any(), namespace = node.namespace()))]
 #[allow(dead_code)]
+#[instrument(skip(client, node), fields(name = %node.name_any(), namespace = node.namespace()))]
 pub async fn delete_metallb_config(client: &Client, node: &StellarNode) -> Result<()> {
     let namespace = node.namespace().unwrap_or_else(|| "default".to_string());
     let api: Api<ConfigMap> = Api::namespaced(client.clone(), &namespace);
@@ -1473,6 +1473,44 @@ fn build_pod_template(
         ..Default::default()
     });
 
+    // Add Cloud HSM sidecar and volumes
+    if let NodeType::Validator = node.spec.node_type {
+        if let Some(validator_config) = &node.spec.validator_config {
+            if let Some(hsm_config) = &validator_config.hsm_config {
+                // If using AWS CloudHSM, add sidecar and shared volume
+                if hsm_config.provider == HsmProvider::AWS {
+                    // Shared socket volume
+                    volumes.push(Volume {
+                        name: "cloudhsm-socket".to_string(),
+                        empty_dir: Some(k8s_openapi::api::core::v1::EmptyDirVolumeSource {
+                            medium: Some("Memory".to_string()),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    });
+
+                    // Sidecar container running CloudHSM client daemon
+                    let containers = &mut pod_spec.containers;
+                    containers.push(Container {
+                        name: "cloudhsm-client".to_string(),
+                        // Use a standard image or user-provided one.
+                        // In reality, user would likely build this or we'd default to a known working one.
+                        // For now, using a placeholder that needs to be valid.
+                        image: Some("amazon/cloudhsm-client:latest".to_string()),
+                        command: Some(vec!["/opt/cloudhsm/bin/cloudhsm_client".to_string()]),
+                        args: Some(vec!["--foreground".to_string()]),
+                        volume_mounts: Some(vec![VolumeMount {
+                            name: "cloudhsm-socket".to_string(),
+                            mount_path: "/var/run/cloudhsm".to_string(),
+                            ..Default::default()
+                        }]),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+    }
+
     PodTemplateSpec {
         metadata: Some(ObjectMeta {
             labels: Some(labels.clone()),
@@ -1586,6 +1624,67 @@ fn build_container(node: &StellarNode, enable_mtls: bool) -> Container {
         }
     }
 
+    // Add HSM environment variables and mounts
+    let mut extra_volume_mounts = Vec::new();
+    if let NodeType::Validator = node.spec.node_type {
+        if let Some(validator_config) = &node.spec.validator_config {
+            if let Some(hsm_config) = &validator_config.hsm_config {
+                // PKCS#11 Module Path
+                env_vars.push(EnvVar {
+                    name: "PKCS11_MODULE_PATH".to_string(),
+                    value: Some(hsm_config.pkcs11_lib_path.clone()),
+                    ..Default::default()
+                });
+
+                // HSM IP (for Azure/Network)
+                if let Some(ip) = &hsm_config.hsm_ip {
+                    env_vars.push(EnvVar {
+                        name: "HSM_IP_ADDRESS".to_string(),
+                        value: Some(ip.clone()),
+                        ..Default::default()
+                    });
+                }
+
+                // HSM Credentials (PIN/User)
+                if let Some(secret_ref) = &hsm_config.hsm_credentials_secret_ref {
+                    env_vars.push(EnvVar {
+                        name: "HSM_PIN".to_string(),
+                        value: None,
+                        value_from: Some(EnvVarSource {
+                            secret_key_ref: Some(SecretKeySelector {
+                                name: Some(secret_ref.clone()),
+                                key: "HSM_PIN".to_string(),
+                                optional: Some(true),
+                            }),
+                            ..Default::default()
+                        }),
+                    });
+                    env_vars.push(EnvVar {
+                        name: "HSM_USER".to_string(),
+                        value: None,
+                        value_from: Some(EnvVarSource {
+                            secret_key_ref: Some(SecretKeySelector {
+                                name: Some(secret_ref.clone()),
+                                key: "HSM_USER".to_string(),
+                                optional: Some(true),
+                            }),
+                            ..Default::default()
+                        }),
+                    });
+                }
+
+                // Mount socket for AWS CloudHSM
+                if hsm_config.provider == HsmProvider::AWS {
+                    extra_volume_mounts.push(VolumeMount {
+                        name: "cloudhsm-socket".to_string(),
+                        mount_path: "/var/run/cloudhsm".to_string(),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+    }
+
     let mut volume_mounts = vec![
         VolumeMount {
             name: "data".to_string(),
@@ -1621,6 +1720,9 @@ fn build_container(node: &StellarNode, enable_mtls: bool) -> Container {
         read_only: Some(true),
         ..Default::default()
     });
+
+    // Add extra mounts (HSM)
+    volume_mounts.extend(extra_volume_mounts);
 
     Container {
         name: "stellar-node".to_string(),

@@ -764,8 +764,8 @@ impl StellarNodeStatus {
     /// ```
     /// DEPRECATED: Use `with_conditions` instead
     #[deprecated(since = "0.2.0", note = "Use with_conditions instead")]
+    #[allow(deprecated)]
     pub fn with_phase(phase: &str) -> Self {
-        #[allow(deprecated)]
         Self {
             phase: phase.to_string(),
             ..Default::default()
@@ -795,6 +795,7 @@ impl StellarNodeStatus {
     /// DEPRECATED: Use condition helpers instead
     #[allow(deprecated)]
     #[deprecated(since = "0.2.0", note = "Use set_condition helpers instead")]
+    #[allow(deprecated)]
     pub fn update(&mut self, phase: &str, message: Option<&str>) {
         self.phase = phase.to_string();
         self.message = message.map(String::from);
@@ -908,6 +909,7 @@ mod tests {
                 key_source: Default::default(),
                 kms_config: None,
                 vl_source: None,
+                hsm_config: None,
             }),
             horizon_config: None,
             soroban_config: None,
