@@ -128,18 +128,6 @@ pub struct StellarNodeSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network_policy: Option<NetworkPolicyConfig>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub load_balancer: Option<LoadBalancerConfig>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub global_discovery: Option<GlobalDiscoveryConfig>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cross_cluster: Option<CrossClusterConfig>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cluster: Option<String>,
-
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dr_config: Option<DisasterRecoveryConfig>,
 
@@ -295,6 +283,7 @@ impl StellarNodeSpec {
         self.storage.retention_policy == RetentionPolicy::Delete
     }
 }
+#[allow(dead_code)]
 fn validate_ingress(ingress: &IngressConfig, errors: &mut Vec<SpecValidationError>) {
     if ingress.hosts.is_empty() {
         errors.push(SpecValidationError::new(
@@ -871,7 +860,6 @@ mod tests {
             topology_spread_constraints: None,
             load_balancer: None,
             global_discovery: None,
-            cluster: None,
             cross_cluster: None,
             resource_meta: None,
         };
@@ -918,7 +906,6 @@ mod tests {
             load_balancer: None,
             global_discovery: None,
             cross_cluster: None,
-            cluster: None,
             resource_meta: None,
         };
 
