@@ -146,9 +146,8 @@ pub async fn check_node_health(
 
     // Get the pod(s) for this node
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), &namespace);
-    let label_selector = format!(
-        "app.kubernetes.io/instance={name},app.kubernetes.io/name=stellar-node"
-    );
+    let label_selector =
+        format!("app.kubernetes.io/instance={name},app.kubernetes.io/name=stellar-node");
 
     let pods = pod_api
         .list(&kube::api::ListParams::default().labels(&label_selector))

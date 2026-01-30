@@ -185,9 +185,8 @@ pub async fn restart_pod(client: &Client, node: &StellarNode) -> Result<()> {
     );
 
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), &namespace);
-    let label_selector = format!(
-        "app.kubernetes.io/instance={name},app.kubernetes.io/name=stellar-node"
-    );
+    let label_selector =
+        format!("app.kubernetes.io/instance={name},app.kubernetes.io/name=stellar-node");
 
     let pods = pod_api
         .list(&ListParams::default().labels(&label_selector))

@@ -36,9 +36,7 @@ pub async fn fetch_vsl(url: &str) -> Result<String> {
 
 /// Trigger a configuration reload in Stellar Core if it's already running
 pub async fn trigger_config_reload(pod_ip: &str) -> Result<()> {
-    let url = format!(
-        "http://{pod_ip}:11626/http-command?admin=true&command=config-reload"
-    );
+    let url = format!("http://{pod_ip}:11626/http-command?admin=true&command=config-reload");
 
     debug!("Triggering config-reload via {}", url);
 

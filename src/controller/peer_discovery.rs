@@ -352,9 +352,7 @@ pub async fn trigger_peer_config_reload(client: &Client, node: &StellarNode) -> 
 
 /// Trigger config reload via HTTP command
 async fn trigger_config_reload_http(pod_ip: &str) -> Result<()> {
-    let url = format!(
-        "http://{pod_ip}:11626/http-command?admin=true&command=config-reload"
-    );
+    let url = format!("http://{pod_ip}:11626/http-command?admin=true&command=config-reload");
 
     debug!("Triggering config-reload via {}", url);
 

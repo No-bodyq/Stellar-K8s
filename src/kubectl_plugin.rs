@@ -192,9 +192,7 @@ fn format_nodes_table(nodes: &[StellarNode], show_namespace: bool) {
             let network = format!("{:?}", node.spec.network);
             let replicas = node.spec.replicas;
             let phase = get_node_phase(node);
-            println!(
-                "{name:<30} {node_type:<15} {network:<15} {replicas:<10} {phase:<15}"
-            );
+            println!("{name:<30} {node_type:<15} {network:<15} {replicas:<10} {phase:<15}");
         }
     }
 }
@@ -251,9 +249,8 @@ async fn logs(
 
     // Find pods using the same label selector as the controller
     let pod_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
-    let label_selector = format!(
-        "app.kubernetes.io/instance={node_name},app.kubernetes.io/name=stellar-node"
-    );
+    let label_selector =
+        format!("app.kubernetes.io/instance={node_name},app.kubernetes.io/name=stellar-node");
 
     let pods = pod_api
         .list(&kube::api::ListParams::default().labels(&label_selector))
