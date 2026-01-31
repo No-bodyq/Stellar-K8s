@@ -42,7 +42,6 @@ requirements.md
 CI_CD_REVIEW.md
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -50,3 +49,6 @@ CI_CD_REVIEW.md
 # OS
 .DS_Store
 Thumbs.db
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
